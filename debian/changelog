@@ -1,6 +1,16 @@
+wingpanel-indicator-appicontray (1.2.1) stable; urgency=medium
+
+  * Handle host registration failure with indicator-application watchers.
+  * Clean up Vala source compiler warnings.
+
+ -- Nano <nano@localhost>  Sun, 08 Nov 2026 21:44:56 +0000
+
 wingpanel-indicator-appicontray (1.2.0) stable; urgency=medium
 
   * Initial release
   * Increased icon spacing
   * Fixed icon proxy issue on icon change
+  * Historical entry reconstructed from the unsigned upstream changelog.
+
+ -- Nano <nano@localhost>  Sun, 08 Nov 2026 21:44:55 +0000
 

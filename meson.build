@@ -1,7 +1,7 @@
 project(
     'wingpanel-indicator-appicontray',
     'vala', 'c',
-    version: '1.0.0',
+    version: '1.2.1',
     license: 'GPL-3.0+'
 )
 
