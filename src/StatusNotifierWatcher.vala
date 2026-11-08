@@ -25,6 +25,7 @@ public class StatusNotifierWatcher : Object {
         registered_hosts = new Gee.ArrayList<string>();
     }
     
+    [DBus (visible = false)]
     public async bool register_on_bus() {
         try {
             connection = yield Bus.get(BusType.SESSION);
@@ -143,7 +144,9 @@ public class StatusNotifierWatcher : Object {
     
     public string[] RegisteredStatusNotifierItems {
         owned get {
-            return registered_items.to_array();
+            var result = new string[registered_items.size];
+            for (int i = 0; i < registered_items.size; i++) result[i] = registered_items[i];
+            return result;
         }
     }
     

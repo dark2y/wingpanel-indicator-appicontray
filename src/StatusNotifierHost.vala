@@ -22,26 +22,20 @@ public class StatusNotifierHost : Object {
     }
     
     public async void start() {
-        try {
-            // Own our host service name
-            host_name_id = Bus.own_name(
-                BusType.SESSION,
-                host_service_name,
-                BusNameOwnerFlags.NONE,
-                null,
-                null,
-                null
-            );
+        // Bus.own_name reports failures asynchronously, not through an exception.
+        host_name_id = Bus.own_name(
+            BusType.SESSION,
+            host_service_name,
+            BusNameOwnerFlags.NONE,
+            null,
+            null,
+            null
+        );
 
-            // Give the bus a moment to register our name
-            Timeout.add(100, () => {
-                connect_to_watcher.begin();
-                return false;
-            });
-
-        } catch (Error e) {
-            critical("Failed to start StatusNotifierHost: %s", e.message);
-        }
+        Timeout.add(100, () => {
+            connect_to_watcher.begin();
+            return false;
+        });
     }
     
     private async void connect_to_watcher() {
@@ -114,9 +108,11 @@ public class StatusNotifierHost : Object {
             current.add(service);
             on_item_registered(service);
         }
-        foreach (var service in icons.keys.to_array()) {
-            if (!current.contains(service)) on_item_unregistered(service);
+        var removed = new Gee.ArrayList<string>();
+        foreach (var service in icons.keys) {
+            if (!current.contains(service)) removed.add(service);
         }
+        foreach (var service in removed) on_item_unregistered(service);
     }
 
     private void on_item_registered(string service) {
