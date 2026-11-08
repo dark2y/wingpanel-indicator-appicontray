@@ -10,6 +10,8 @@ public class StatusNotifierHost : Object {
     private Gee.HashMap<string, TrayIcon> icons;
     private string host_service_name;
     private uint host_name_id = 0;
+    private uint fallback_poll_id = 0;
+    private Gee.HashSet<string> displayed = new Gee.HashSet<string>();
     
     public signal void icon_added(TrayIcon icon);
     public signal void icon_removed(TrayIcon icon);
@@ -52,17 +54,39 @@ public class StatusNotifierHost : Object {
                 DBusProxyFlags.NONE
             );
             
-            // Register as a host
-            yield watcher.RegisterStatusNotifierHost(host_service_name);
-            debug("StatusNotifierHost registered on D-Bus: %s", host_service_name);
-            
-            // Listen for new items
+            // Subscribe before reading the initial snapshot.
             watcher.StatusNotifierItemRegistered.connect(on_item_registered);
             watcher.StatusNotifierItemUnregistered.connect(on_item_unregistered);
-            
-            // Register existing items
-            foreach (var item_service in watcher.RegisteredStatusNotifierItems) {
-                on_item_registered(item_service);
+
+            try {
+                yield watcher.RegisterStatusNotifierHost(host_service_name);
+                debug("StatusNotifierHost registered on D-Bus: %s", host_service_name);
+                foreach (var item_service in watcher.RegisteredStatusNotifierItems) {
+                    on_item_registered(item_service);
+                }
+            } catch (Error e) {
+                // indicator-application implements this method as a failing stub.
+                // Its watcher still exposes the registered item list, but does not
+                // reliably emit item signals, so read the property directly.
+                var remote_error = DBusError.get_remote_error(e);
+                if (remote_error != "org.freedesktop.DBus.GLib.ErrorError" ||
+                    !e.message.contains("Method invoked for RegisterStatusNotifierHost returned FALSE but did not set error")) {
+                    throw e;
+                }
+                warning("Watcher rejected host registration; polling its item list: %s", e.message);
+                yield refresh_items();
+                if (fallback_poll_id == 0) {
+                    fallback_poll_id = Timeout.add_seconds(2, () => {
+                        refresh_items.begin((obj, result) => {
+                            try {
+                                refresh_items.end(result);
+                            } catch (Error poll_error) {
+                                warning("Failed to refresh tray items: %s", poll_error.message);
+                            }
+                        });
+                        return Source.CONTINUE;
+                    });
+                }
             }
             
         } catch (Error e) {
@@ -75,6 +99,26 @@ public class StatusNotifierHost : Object {
         }
     }
     
+    private async void refresh_items() throws Error {
+        var conn = yield Bus.get(BusType.SESSION);
+        var reply = yield conn.call(
+            "org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher",
+            "org.freedesktop.DBus.Properties", "Get",
+            new Variant("(ss)", "org.kde.StatusNotifierWatcher", "RegisteredStatusNotifierItems"),
+            new VariantType("(v)"), DBusCallFlags.NONE, 5000, null
+        );
+        Variant boxed;
+        reply.get("(v)", out boxed);
+        var current = new Gee.HashSet<string>();
+        foreach (var service in boxed.get_strv()) {
+            current.add(service);
+            on_item_registered(service);
+        }
+        foreach (var service in icons.keys.to_array()) {
+            if (!current.contains(service)) on_item_unregistered(service);
+        }
+    }
+
     private void on_item_registered(string service) {
         // Don't add duplicates
         if (icons.has_key(service)) {
@@ -109,13 +153,15 @@ public class StatusNotifierHost : Object {
         }
         
         var icon = new TrayIcon(service, bus_name, object_path);
+        icons.set(service, icon);
         icon.ready.connect(() => {
-            icons.set(service, icon);
+            if (icons.get(service) != icon) return;
+            displayed.add(service);
             icon_added(icon);
         });
-        
+
         icon.removed.connect(() => {
-            on_item_unregistered(service);
+            if (icons.get(service) == icon) on_item_unregistered(service);
         });
         
         icon.initialize.begin();
@@ -125,8 +171,8 @@ public class StatusNotifierHost : Object {
         debug("StatusNotifierItem unregistered: %s", service);
         var icon = icons.get(service);
         if (icon != null) {
-            icon_removed(icon);
             icons.unset(service);
+            if (displayed.remove(service)) icon_removed(icon);
         }
     }
     
@@ -136,7 +182,12 @@ public class StatusNotifierHost : Object {
             host_name_id = 0;
         }
         
+        if (fallback_poll_id != 0) {
+            Source.remove(fallback_poll_id);
+            fallback_poll_id = 0;
+        }
         icons.clear();
+        displayed.clear();
     }
 }
 
